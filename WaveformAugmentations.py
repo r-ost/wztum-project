@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torchaudio.transforms as T
 import random
-import torch.nn.functional as F
+import torchaudio.functional as F
 
 
 class WaveformAugmentations:
