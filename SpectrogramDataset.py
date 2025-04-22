@@ -1,11 +1,10 @@
 import os
 import torch
-import torchaudio
 
 from torch.utils.data import Dataset
 import torch.nn.functional as F
 
-class AudioWaveformDataset(Dataset):
+class SpectrogramDataset(Dataset):
     def __init__(
         self,
         root_dir,
@@ -41,7 +40,7 @@ class AudioWaveformDataset(Dataset):
             mapped_lbl = lbl if lbl in allowed else "unknown"
             label_idx = self.label2idx[mapped_lbl]
             for f in os.listdir(folder):
-                if f.endswith('.wav'):
+                if f.endswith('.pt'):
                     full_path = os.path.join(folder, f)
                     self.filepaths.append(full_path)
                     self.labels.append(label_idx)
@@ -52,10 +51,8 @@ class AudioWaveformDataset(Dataset):
     def __getitem__(self, idx):
         filepath = self.filepaths[idx]
         label = self.labels[idx]
-        waveform, _ = torchaudio.load(filepath)
-        waveform = waveform.squeeze(0)
-        return waveform, label
-
+        spectrogram = torch.load(filepath)
+        return spectrogram, label
 
 def pad_collate_fn(batch):
     """
