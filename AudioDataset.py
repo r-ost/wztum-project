@@ -41,7 +41,7 @@ class AudioDataset(Dataset):
         self.idx2label = {}
 
         # Allowed classes
-        allowed = {"yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go"}
+        allowed = {"yes", "no", "up", "down", "left", "right", "on", "off", "stop", "go", 'silence'}
 
         # Prepare cache directory if needed
         if self.cache_dir:
