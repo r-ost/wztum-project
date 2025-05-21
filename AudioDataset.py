@@ -6,6 +6,8 @@ import numpy as np
 from PIL import Image
 import torch.nn.functional as F
 from torch.utils.data import Dataset
+import random
+from collections import defaultdict
 
 # Global transforms for spectrogram generation
 mel_transform = T.MelSpectrogram(sample_rate=16000, n_mels=64)
@@ -20,7 +22,8 @@ class AudioDataset(Dataset):
         preprocess=False,
         transform=None,
         allowed_classes=None,
-        save_spectrograms=True
+        save_spectrograms=True,
+        max_samples_per_class=None  # undersampling: max number of files per class
     ):
         """
         Args:
@@ -30,16 +33,16 @@ class AudioDataset(Dataset):
             preprocess (bool): If True, compute and cache spectrograms (and exports) on initialization.
             transform (callable, optional): Further transforms applied on the spectrogram at __getitem__.
             allowed_classes (iterable of str, optional): Which folder names to treat as known classes.
-                Defaults to {"yes","no","up","down","left","right","on","off","stop","go","silence"}.
             save_spectrograms (bool): If False, skip saving to disk (both cache and PNG exports).
+            max_samples_per_class (int, optional): If set, randomly undersample each class to at most this many samples.
         """
-        self.root_dir          = root_dir
-        self.cache_dir         = cache_dir
-        self.export_dir        = export_dir
-        self.preprocess        = preprocess
-        self.transform         = transform
-        self.save_spectrograms = save_spectrograms
-        # allowed classes set (includes 'silence' by default)
+        self.root_dir              = root_dir
+        self.cache_dir             = cache_dir
+        self.export_dir            = export_dir
+        self.preprocess            = preprocess
+        self.transform             = transform
+        self.save_spectrograms     = save_spectrograms
+        self.max_samples_per_class = max_samples_per_class
         self.allowed = set(allowed_classes) if allowed_classes else {
             "yes","no","up","down","left","right","on","off","stop","go","silence"
         }
@@ -72,7 +75,8 @@ class AudioDataset(Dataset):
                 self.label2idx["unknown"] = idx
                 self.idx2label[idx]    = "unknown"
 
-            # collect file paths & labels
+            # collect file paths per class
+            filepaths_by_label = defaultdict(list)
             for lbl in subdirs:
                 folder     = os.path.join(root_dir, lbl)
                 mapped_lbl = lbl if lbl in self.allowed else "unknown"
@@ -81,20 +85,28 @@ class AudioDataset(Dataset):
                     os.makedirs(os.path.join(self.export_dir, mapped_lbl), exist_ok=True)
                 for f in os.listdir(folder):
                     if f.lower().endswith('.wav'):
-                        self.filepaths.append(os.path.join(folder, f))
-                        self.labels.append(label_idx)
+                        filepaths_by_label[label_idx].append(os.path.join(folder, f))
+
+            # apply undersampling if requested
+            for label_idx, paths in filepaths_by_label.items():
+                if self.max_samples_per_class and len(paths) > self.max_samples_per_class:
+                    sampled = random.sample(paths, self.max_samples_per_class)
+                else:
+                    sampled = paths
+                self.filepaths.extend(sampled)
+                self.labels.extend([label_idx] * len(sampled))
         else:
             # single-class root directory
             lbl = os.path.basename(root_dir)
             mapped_lbl = lbl if lbl in self.allowed else "unknown"
             self.label2idx[mapped_lbl] = 0
             self.idx2label[0]           = mapped_lbl
-            if self.save_spectrograms and self.export_dir:
-                os.makedirs(os.path.join(self.export_dir, mapped_lbl), exist_ok=True)
-            for f in os.listdir(root_dir):
-                if f.lower().endswith('.wav'):
-                    self.filepaths.append(os.path.join(root_dir, f))
-                    self.labels.append(0)
+            spec_paths = [os.path.join(root_dir, f) for f in os.listdir(root_dir) if f.lower().endswith('.wav')]
+            # undersample single class if requested
+            if self.max_samples_per_class and len(spec_paths) > self.max_samples_per_class:
+                spec_paths = random.sample(spec_paths, self.max_samples_per_class)
+            self.filepaths = spec_paths
+            self.labels    = [0] * len(spec_paths)
 
         # Precompute (cache + export) if requested
         if self.preprocess and self.save_spectrograms and (self.cache_dir or self.export_dir):
@@ -128,7 +140,6 @@ class AudioDataset(Dataset):
             img_dir  = os.path.join(self.export_dir, mapped)
             img_path = os.path.join(img_dir, f"{base}.png")
             if not os.path.exists(img_path):
-                # normalize spectrogram to 0-255
                 arr = spec_db.squeeze(0).numpy()
                 min_val, max_val = arr.min(), arr.max()
                 norm = 255 * (arr - min_val) / (max_val - min_val + 1e-6)
